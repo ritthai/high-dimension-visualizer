@@ -1,0 +1,334 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>High Dimension Visualizer</title>
+<style type="text/css">
+body {
+	background-color:#000000;
+	font-family: Verdana, Arial, sans-serif;
+	color:#ffffff;
+}
+
+h1 {
+	font-size: 120%
+}
+</style>
+</head>
+<body>
+	<h1>High Dimension Visualizer</h1>
+	<p>By Ritchie Thai. Originally created on 2012-07-28. Last updated on 2012-08-12</p>
+	<p>This is a hypercube. Use the W, A, S, D, and the arrow keys to change the the camera's 4 dimensional position.
+	I'd like to add controls for camera direction later, which should be when things really get trippy.</p>
+	<canvas id="canvas" width="800" height="600" style="border: 1px solid #ffffff;"></canvas>
+<script type="text/javascript">
+(function () {
+	"use strict";
+	var HYPERCUBE_SIDE_LENGTH = 50,
+		SPEED = 5,
+		ROTATION_SPEED = Math.PI / 60,
+		cameraPosition = [175, 100, 150, 30],
+		cameraDirection = [1, 0, 0, 0], // directions must be perpendicular
+		projectionScreenDistance = 100,
+	
+		initialProjectionScreenUpDirection = [0, 1, 0, 0],
+		initialProjectionScreenRightDirection = [0, 0, 1, 0],
+	
+		cameraRotation = [],
+
+		projectionScreenUpDirection = [0, 1, 0, 0],
+		projectionScreenRightDirection = [0, 0, 1, 0],
+
+		projectionScreenCenter,
+		context,
+
+		init,
+		actOnKeyDown,
+		actOnKeyPress,
+		drawShape,
+		projectAndStrokeLineBetweenPoints,
+		projectAndStrokeQuadrilateralWithPoints,
+		projectAndMoveContextToPoint,
+		projectAndLineContextToPoint,
+		projectTo2D,
+		addVectors,
+		calcLinePlaneIntersection,
+		calc2DPointFromPointOnScreen,
+		calcVectorProjectionOnVector,
+		calcDotProduct,
+		calcMagnitudeOfVector,
+		multiplyScalarWithVector;
+
+	init = function () {
+		cameraRotation[0] = [];
+		cameraRotation[1] = [];
+		cameraRotation[2] = [];
+		cameraRotation[0][1] = 0;
+		cameraRotation[0][2] = 0;
+		cameraRotation[0][3] = 0;
+		cameraRotation[1][2] = ROTATION_SPEED * 3;
+		cameraRotation[1][3] = ROTATION_SPEED * 2;
+		cameraRotation[2][3] = 0;
+
+		document.onkeydown = actOnKeyDown;
+		document.onkeypress = actOnKeyPress;
+		drawShape();
+	};
+	
+	actOnKeyDown = function (event) {
+		if (event.keyCode === 38) { // up
+			cameraPosition[1] += SPEED;
+		} else if (event.keyCode === 40) { // down
+			cameraPosition[1] -= SPEED;
+		} else if (event.keyCode === 37) { // left
+			cameraPosition[3] += SPEED;
+		} else if (event.keyCode === 39) { // right
+			cameraPosition[3] -= SPEED;
+		} else {
+			return;
+		}
+		drawShape();
+	};
+	
+	actOnKeyPress = function (event) {
+		console.log(event.charCode);
+		if (event.charCode === 119) { // W
+			cameraPosition[0] -= SPEED;
+		} else if (event.charCode === 115) { // S
+			cameraPosition[0] += SPEED;
+		} else if (event.charCode === 97) { // A
+			cameraPosition[2] += SPEED;
+		} else if (event.charCode === 100) { // D
+			cameraPosition[2] -= SPEED;
+		} else if (event.charCode === 49) { // 1
+			cameraRotation[0][1] -= ROTATION_SPEED;
+		} else if (event.charCode === 50) { // 2
+			cameraRotation[0][1] += ROTATION_SPEED;
+		} else if (event.charCode === 51) { // 3
+			cameraRotation[0][2] -= ROTATION_SPEED;
+		} else if (event.charCode === 52) { // 4
+			cameraRotation[0][2] += ROTATION_SPEED;
+		} else if (event.charCode === 53) { // 5
+			cameraRotation[0][3] -= ROTATION_SPEED;
+		} else if (event.charCode === 54) { // 6
+			cameraRotation[0][3] += ROTATION_SPEED;
+		} else if (event.charCode === 55) { // 7
+			cameraRotation[1][2] -= ROTATION_SPEED;
+		} else if (event.charCode === 56) { // 8
+			cameraRotation[1][2] += ROTATION_SPEED;
+		} else if (event.charCode === 57) { // 9
+			cameraRotation[1][3] -= ROTATION_SPEED;
+		} else if (event.charCode === 48) { // 0
+			cameraRotation[1][3] += ROTATION_SPEED;
+		} else if (event.charCode === 45) { // -
+			cameraRotation[2][3] -= ROTATION_SPEED;
+		} else if (event.charCode === 61) { // =
+			cameraRotation[2][3] += ROTATION_SPEED;
+		} else {
+			return;
+		}
+		drawShape();
+	};
+
+
+	var rotateVectorByAngleInOrthogonalPlane = function (vector, angleOfRotation, planeOfRotationAxisIndex1, planeOfRotationAxisIndex2) {
+		vector[planeOfRotationAxisIndex1] =
+			vector[planeOfRotationAxisIndex1] * Math.cos(angleOfRotation) -
+			vector[planeOfRotationAxisIndex2] * Math.sin(angleOfRotation);
+		vector[planeOfRotationAxisIndex2] =
+			vector[planeOfRotationAxisIndex1] * Math.sin(angleOfRotation) +
+			vector[planeOfRotationAxisIndex2] * Math.cos(angleOfRotation);
+	};
+	
+	var calculateProjectionScreenDirectionsFromRotation = function () {
+		var componentIndex, planeOfRotationAxisIndex1, planeOfRotationAxisIndex2, angleOfRotation;
+	
+		for (componentIndex = 0; componentIndex < projectionScreenUpDirection.length; componentIndex += 1) {
+			projectionScreenUpDirection[componentIndex] = initialProjectionScreenUpDirection[componentIndex];
+			projectionScreenRightDirection[componentIndex] = initialProjectionScreenRightDirection[componentIndex];
+		}
+	
+		for (planeOfRotationAxisIndex1 = 0;
+				planeOfRotationAxisIndex1 < initialProjectionScreenUpDirection.length;
+				planeOfRotationAxisIndex1 += 1) {
+			for (planeOfRotationAxisIndex2 = planeOfRotationAxisIndex1 + 1;
+					planeOfRotationAxisIndex2 < initialProjectionScreenRightDirection.length;
+					planeOfRotationAxisIndex2 += 1) {
+				angleOfRotation = cameraRotation[planeOfRotationAxisIndex1][planeOfRotationAxisIndex2];
+
+				rotateVectorByAngleInOrthogonalPlane(projectionScreenUpDirection, angleOfRotation,
+					planeOfRotationAxisIndex1, planeOfRotationAxisIndex2);
+				rotateVectorByAngleInOrthogonalPlane(projectionScreenRightDirection, angleOfRotation,
+					planeOfRotationAxisIndex1, planeOfRotationAxisIndex2);
+			}
+		}
+	};
+
+	drawShape = function () {
+		var canvas = document.getElementById('canvas'),
+			HSL = HYPERCUBE_SIDE_LENGTH;
+		if (!canvas.getContext) {
+			return;
+		}
+		context = canvas.getContext('2d');
+		context.clearRect(0, 0, 800, 600);
+	
+		calculateProjectionScreenDirectionsFromRotation();
+
+		context.strokeStyle = '#f00';
+		projectAndStrokeQuadrilateralWithPoints([0, 0, 0, 0], [0, HSL, 0, 0], [HSL, HSL, 0, 0], [HSL, 0, 0, 0]);
+		projectAndStrokeQuadrilateralWithPoints([0, 0, 0, 0], [0, 0, HSL, 0], [HSL, 0, HSL, 0], [HSL, 0, 0, 0]);
+		projectAndStrokeQuadrilateralWithPoints([0, 0, 0, 0], [0, 0, HSL, 0], [0, HSL, HSL, 0], [0, HSL, 0, 0]);
+
+		projectAndStrokeQuadrilateralWithPoints([0, 0, HSL, 0], [0, HSL, HSL, 0], [HSL, HSL, HSL, 0], [HSL, 0, HSL, 0]);
+		projectAndStrokeQuadrilateralWithPoints([0, HSL, 0, 0], [0, HSL, HSL, 0], [HSL, HSL, HSL, 0], [HSL, HSL, 0, 0]);
+		projectAndStrokeQuadrilateralWithPoints([HSL, 0, 0, 0], [HSL, 0, HSL, 0], [HSL, HSL, HSL, 0], [HSL, HSL, 0, 0]);
+
+		context.strokeStyle = '#00f';
+		projectAndStrokeQuadrilateralWithPoints([0, 0, 0, HSL], [0, HSL, 0, HSL], [HSL, HSL, 0, HSL], [HSL, 0, 0, HSL]);
+		projectAndStrokeQuadrilateralWithPoints([0, 0, 0, HSL], [0, 0, HSL, HSL], [HSL, 0, HSL, HSL], [HSL, 0, 0, HSL]);
+		projectAndStrokeQuadrilateralWithPoints([0, 0, 0, HSL], [0, 0, HSL, HSL], [0, HSL, HSL, HSL], [0, HSL, 0, HSL]);
+
+		projectAndStrokeQuadrilateralWithPoints([0, 0, HSL, HSL], [0, HSL, HSL, HSL], [HSL, HSL, HSL, HSL], [HSL, 0, HSL, HSL]);
+		projectAndStrokeQuadrilateralWithPoints([0, HSL, 0, HSL], [0, HSL, HSL, HSL], [HSL, HSL, HSL, HSL], [HSL, HSL, 0, HSL]);
+		projectAndStrokeQuadrilateralWithPoints([HSL, 0, 0, HSL], [HSL, 0, HSL, HSL], [HSL, HSL, HSL, HSL], [HSL, HSL, 0, HSL]);
+
+		context.strokeStyle = '#f0f';
+		projectAndStrokeLineBetweenPoints([0, 0, 0, 0], [0, 0, 0, HSL]);
+		projectAndStrokeLineBetweenPoints([0, 0, HSL, 0], [0, 0, HSL, HSL]);
+		projectAndStrokeLineBetweenPoints([0, HSL, 0, 0], [0, HSL, 0, HSL]);
+		projectAndStrokeLineBetweenPoints([0, HSL, HSL, 0], [0, HSL, HSL, HSL]);
+		projectAndStrokeLineBetweenPoints([HSL, 0, 0, 0], [HSL, 0, 0, HSL]);
+		projectAndStrokeLineBetweenPoints([HSL, 0, HSL, 0], [HSL, 0, HSL, HSL]);
+		projectAndStrokeLineBetweenPoints([HSL, HSL, 0, 0], [HSL, HSL, 0, HSL]);
+		projectAndStrokeLineBetweenPoints([HSL, HSL, HSL, 0], [HSL, HSL, HSL, HSL]);
+	};
+
+	projectAndStrokeLineBetweenPoints = function (point1, point2) {
+		context.beginPath();
+		projectAndMoveContextToPoint(point1);
+		projectAndLineContextToPoint(point2);
+		context.closePath();
+		context.stroke();
+	};
+	
+	projectAndStrokeQuadrilateralWithPoints = function (point1, point2, point3, point4) {
+		context.beginPath();
+		projectAndMoveContextToPoint(point1);
+		projectAndLineContextToPoint(point2);
+		projectAndLineContextToPoint(point3);
+		projectAndLineContextToPoint(point4);
+		projectAndLineContextToPoint(point1);
+		context.closePath();
+		context.stroke();
+	};
+
+	var SCALE = 1/20;
+	
+	projectAndMoveContextToPoint = function (point) { // division by 100 just scaling
+		var position = projectTo2D(point);
+		context.moveTo(position.x*SCALE, position.y*SCALE);
+	};
+
+	projectAndLineContextToPoint = function (point) { // division by 100 just scaling
+		var position = projectTo2D(point);
+		context.lineTo(position.x*SCALE, position.y*SCALE);
+	};
+
+	projectTo2D = function (point) {
+		var cameraToPointVector,
+			cameraToPointLine,
+			cameraDirectionMagnitude,
+			projectionScreemDistanceMultipliedWithCameraDirection,
+			cameraToProjectionScreenCenter,
+			projectionPlane,
+			unflattenedProjectedPoint,
+			flatProjectedPoint;
+
+		cameraToPointVector = addVectors(point, cameraPosition);
+		cameraToPointLine = {point: cameraPosition, vector: cameraToPointVector};
+
+		cameraDirectionMagnitude = calcMagnitudeOfVector(cameraDirection);
+		projectionScreemDistanceMultipliedWithCameraDirection = multiplyScalarWithVector(projectionScreenDistance, cameraDirection);
+
+		cameraToProjectionScreenCenter = multiplyScalarWithVector(-1 / cameraDirectionMagnitude, projectionScreemDistanceMultipliedWithCameraDirection);
+		
+		projectionScreenCenter = addVectors(cameraPosition, cameraToProjectionScreenCenter);
+		projectionPlane = {point: projectionScreenCenter, normal: cameraDirection};
+
+		unflattenedProjectedPoint = calcLinePlaneIntersection(cameraToPointLine, projectionPlane);
+		flatProjectedPoint = calc2DPointFromPointOnScreen(unflattenedProjectedPoint);
+		return flatProjectedPoint;
+	};
+
+	calcLinePlaneIntersection = function (line, plane) {
+		var i,
+			coefficient,
+			linePointToIntersection,
+			intersection;
+		for (i = 0; i < line.vector.length; i += 1) {
+			if (i !== 0) { break; }
+		}
+		coefficient = calcDotProduct(plane.normal, addVectors(plane.point, multiplyScalarWithVector(-1, line.point))) / calcDotProduct(plane.normal, line.vector);
+		linePointToIntersection = multiplyScalarWithVector(coefficient, line.vector);
+		intersection = addVectors(line.point, linePointToIntersection);
+		return intersection;
+	};
+
+	calc2DPointFromPointOnScreen = function (point) {
+		var screenCenterToPoint = addVectors(point, multiplyScalarWithVector(-1, projectionScreenCenter)),
+			pointIn2D;
+		pointIn2D = {
+			x: calcMagnitudeOfVector(calcVectorProjectionOnVector(screenCenterToPoint, projectionScreenRightDirection)),
+			y: calcMagnitudeOfVector(multiplyScalarWithVector(-1, calcVectorProjectionOnVector(screenCenterToPoint, projectionScreenUpDirection)))
+		};
+		return pointIn2D;
+	};
+
+	calcVectorProjectionOnVector = function (projector, projectee) {
+		var dotProduct = calcDotProduct(projector, projectee),
+			projecteeMagnitude = calcMagnitudeOfVector(projectee),
+			projection = multiplyScalarWithVector(1/(projecteeMagnitude * projecteeMagnitude), multiplyScalarWithVector(dotProduct, projectee));
+		return projection;
+	};
+
+	calcDotProduct = function (vector1, vector2) {
+		var i,
+			result = 0;
+		for (i = 0; i < Math.min(vector1.length, vector2.length); i += 1) {
+			result += vector1[i] * vector2[i];
+		}
+		return result;
+	};
+
+	addVectors = function (vector1, vector2) {
+		var i,
+			result = [];
+		for (i = 0; i < Math.min(vector1.length, vector2.length); i += 1) {
+			result[i] = vector1[i] + vector2[i];
+		}
+		return result;
+	};
+
+	calcMagnitudeOfVector = function (vector) {
+		var i,
+			magnitude = 0;
+		for (i = 0; i < vector.length; i += 1) {
+			magnitude += vector[i] * vector[i];
+		}
+		return magnitude;
+	};
+
+	multiplyScalarWithVector = function (scalar, vector) {
+		var i,
+			result = [];
+		for (i = 0; i < vector.length; i += 1) {
+			result[i] = scalar * vector[i];
+		}
+		return result;
+	};
+
+	init();
+}());
+</script>
+</body>
+</html>
